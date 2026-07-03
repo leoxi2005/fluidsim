@@ -26,11 +26,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Use latest node-gyp
+      # the package's bundled node-gyp 9 needs distutils, removed in Python 3.12
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Point node-gyp at Python 3.11
         shell: bash
-        run: |
-          npm install -g node-gyp@latest
-          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+        run: echo "npm_config_python=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
       # builds grandiose.node for win-x64 and downloads the NDI SDK DLL
       - name: Install dependencies (native build)

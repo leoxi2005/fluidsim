@@ -15,6 +15,10 @@ export interface PanelEnv {
   randomSplats(): void
   clearDye(): void
   toggleFullscreen(): void
+  recording: { active: boolean; status: string }
+  toggleRecording(): void
+  exportJob: { active: boolean; status: string }
+  startExport(durationSec: number, fps: number): void
   presets: {
     getAll(): { name: string }[]
     save(name: string): Promise<void>
@@ -301,6 +305,18 @@ export function buildPanel(env: PanelEnv): PanelHandle {
         : 'sẵn sàng (đang tắt)'
     })
   }, 2000)
+
+  // --- record & export ------------------------------------------------------------------
+  const fRec = pane.addFolder({ title: 'Record & Export', expanded: false })
+  fRec.addButton({ title: '⏺ Record WebM (start/stop)' }).on('click', env.toggleRecording)
+  fRec.addBinding(env.recording, 'status', { readonly: true, label: 'rec', interval: 500 })
+  const exportOpts = { duration: 10, fps: 60 }
+  fRec.addBinding(exportOpts, 'duration', { label: 'PNG seq (s)', min: 1, max: 120, step: 1 })
+  fRec.addBinding(exportOpts, 'fps', { label: 'PNG seq fps', options: { '60': 60, '30': 30 } })
+  fRec.addButton({ title: '🖼 Export PNG sequence' }).on('click', () => {
+    env.startExport(exportOpts.duration, exportOpts.fps)
+  })
+  fRec.addBinding(env.exportJob, 'status', { readonly: true, label: 'export', interval: 500 })
 
   // --- actions & perf ----------------------------------------------------------------------
   const fActions = pane.addFolder({ title: 'Actions', expanded: false })

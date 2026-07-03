@@ -209,6 +209,55 @@ async function main(): Promise<void> {
     if (entry) fader.start(state, entry.data, state.output.crossfadeSec)
   }
 
+  // --- recording (realtime WebM via MediaRecorder) ---------------------------------
+  const recState = { active: false, status: '—' }
+  let recorder: MediaRecorder | null = null
+  let recChunks: Blob[] = []
+  let recStartedAt = 0
+
+  const toggleRecording = (): void => {
+    if (recState.active) {
+      recorder?.stop()
+      recState.active = false
+      return
+    }
+    const stream = canvas.captureStream(60)
+    recorder = new MediaRecorder(stream, {
+      mimeType: 'video/webm;codecs=vp9',
+      videoBitsPerSecond: 30_000_000
+    })
+    recChunks = []
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recChunks.push(e.data)
+    }
+    recorder.onstop = () => {
+      const blob = new Blob(recChunks, { type: 'video/webm' })
+      recState.status = 'đang lưu…'
+      void blob.arrayBuffer().then(async (buf) => {
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+        const res = await window.liquid.saveRecording(`LIQUID_${stamp}.webm`, buf)
+        recState.status = res.ok ? `đã lưu ✓` : 'đã huỷ'
+      })
+    }
+    recorder.start(1000)
+    recStartedAt = performance.now()
+    recState.active = true
+  }
+
+  // --- PNG sequence export (offline, fixed timestep) --------------------------------
+  const exportJob = { active: false, index: 0, total: 0, dir: '', fps: 60, status: '—' }
+
+  const startExport = async (durationSec: number, fps: number): Promise<void> => {
+    if (exportJob.active) return
+    const dir = await window.liquid.pickExportDir()
+    if (!dir) return
+    exportJob.dir = dir
+    exportJob.fps = fps
+    exportJob.index = 0
+    exportJob.total = Math.round(durationSec * fps)
+    exportJob.active = true
+  }
+
   // --- in-window control panel ---------------------------------------------------
   const stats = { fps: 0 }
   const meters = { sub: 0, bass: 0, mid: 0, treble: 0, kick: 0, snare: 0, hat: 0, energy: 0 }
@@ -219,6 +268,10 @@ async function main(): Promise<void> {
     randomSplats: () => solver.multipleSplats(8, state.sim.splatRadius, () => paletteColor(0.7)),
     clearDye: () => solver.clearDye(),
     toggleFullscreen: () => window.liquid.sendAction({ type: 'toggleFullscreen' }),
+    recording: recState,
+    toggleRecording,
+    exportJob,
+    startExport: (dur: number, fps: number) => void startExport(dur, fps),
     presets: {
       getAll: () => presetsCache,
       save: async (name: string) => {
@@ -317,8 +370,10 @@ async function main(): Promise<void> {
   let prevPaper = isPaperStyle()
 
   function frame(now: number): void {
-    const rawDt = (now - lastTime) / 1000
-    const dt = Math.min(rawDt, 0.016666) // sim slows down instead of exploding on hitches
+    // export mode: deterministic fixed timestep, one PNG per sim frame
+    const exporting = exportJob.active
+    const rawDt = exporting ? 1 / exportJob.fps : (now - lastTime) / 1000
+    const dt = exporting ? rawDt : Math.min(rawDt, 0.016666) // no dt explosion on hitches
     lastTime = now
     const nowSec = now / 1000
 
@@ -375,13 +430,14 @@ async function main(): Promise<void> {
         audioActive: state.audio.source !== 'none'
       })
       // global speed scale — slow, ink-on-paper motion without weakening forces.
-      // simSpeed mapping couples tempo to loudness: quiet passages crawl
-      // (×0.3 floor), loud sections race past baseline
+      // simSpeed mapping couples tempo to loudness with heavy contrast:
+      // silence ≈ frozen (×0.08 floor), pow-curve so loud sections visibly race
       const speedMap = state.mappings.simSpeed
-      const audioSpeedMult =
-        state.audio.source !== 'none' && speedMap.source !== 'none'
-          ? 0.3 + modLevel(speedMap)
-          : 1
+      let audioSpeedMult = 1
+      if (state.audio.source !== 'none' && speedMap.source !== 'none') {
+        const lvl = Math.min(modLevel(speedMap), 1.3)
+        audioSpeedMult = 0.08 + Math.pow(lvl, 1.7) * 2.3
+      }
       solver.step(dt * state.sim.speed * audioSpeedMult, effSim)
     }
 
@@ -416,6 +472,35 @@ async function main(): Promise<void> {
       stats.fps = Math.round(fpsFrames / fpsAccum)
       fpsAccum = 0
       fpsFrames = 0
+    }
+
+    if (recState.active) {
+      const sec = Math.floor((now - recStartedAt) / 1000)
+      recState.status = `● REC ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
+    }
+
+    if (exporting) {
+      // hold the loop until this frame's PNG is on disk (backpressure)
+      canvas.toBlob((blob) => {
+        const finish = (): void => {
+          exportJob.index++
+          exportJob.status = `${exportJob.index}/${exportJob.total}`
+          if (exportJob.index >= exportJob.total) {
+            exportJob.active = false
+            exportJob.status = `xong ✓ ${exportJob.total} frames`
+          }
+          requestAnimationFrame(frame)
+        }
+        if (!blob) {
+          finish()
+          return
+        }
+        void blob
+          .arrayBuffer()
+          .then((buf) => window.liquid.writeExportFrame(exportJob.dir, exportJob.index, buf))
+          .then(finish, finish)
+      }, 'image/png')
+      return
     }
 
     requestAnimationFrame(frame)

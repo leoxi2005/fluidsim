@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, nativeImage, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, session } from 'electron'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, promises as fsp, writeFileSync } from 'fs'
 import { defaultState, type AppState, type NdiFrameMeta, type PresetEntry } from '../shared/params'
 import { deepMerge } from '../shared/merge'
 import { IPC, type Action, type StatePatch } from '../shared/api'
@@ -73,6 +73,33 @@ ipcMain.on(IPC.statePatch, (event, patch: StatePatch) => {
 ipcMain.handle(IPC.presetsAll, () => persist.allPresets())
 ipcMain.handle(IPC.presetsSave, (_e, entry: PresetEntry) => persist.savePreset(entry))
 ipcMain.handle(IPC.presetsDelete, (_e, name: string) => persist.deletePreset(name))
+
+// ---- recording / PNG export --------------------------------------------------
+
+ipcMain.handle(IPC.recordSave, async (_e, suggestedName: string, data: ArrayBuffer) => {
+  if (!outputWin) return { ok: false }
+  const res = await dialog.showSaveDialog(outputWin, {
+    defaultPath: join(app.getPath('videos'), suggestedName),
+    filters: [{ name: 'WebM video', extensions: ['webm'] }]
+  })
+  if (res.canceled || !res.filePath) return { ok: false }
+  writeFileSync(res.filePath, Buffer.from(data))
+  return { ok: true, path: res.filePath }
+})
+
+ipcMain.handle(IPC.exportPickDir, async () => {
+  if (!outputWin) return null
+  const res = await dialog.showOpenDialog(outputWin, {
+    title: 'Chọn thư mục xuất PNG sequence',
+    properties: ['openDirectory', 'createDirectory']
+  })
+  return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]
+})
+
+ipcMain.handle(IPC.exportFrame, async (_e, dir: string, index: number, data: ArrayBuffer) => {
+  const name = `frame_${String(index).padStart(5, '0')}.png`
+  await fsp.writeFile(join(dir, name), Buffer.from(data))
+})
 
 ipcMain.on(IPC.action, (_event, action: Action) => {
   if (action.type === 'toggleFullscreen') {

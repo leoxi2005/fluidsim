@@ -24,7 +24,11 @@ const api: LiquidApi = {
   ndiFrame: (meta, data) => ipcRenderer.send(IPC.ndiFrame, meta, data),
   presetsAll: () => ipcRenderer.invoke(IPC.presetsAll),
   presetsSave: (entry: PresetEntry) => ipcRenderer.invoke(IPC.presetsSave, entry),
-  presetsDelete: (name: string) => ipcRenderer.invoke(IPC.presetsDelete, name)
+  presetsDelete: (name: string) => ipcRenderer.invoke(IPC.presetsDelete, name),
+  saveRecording: (suggestedName: string, data: ArrayBuffer) => ipcRenderer.invoke(IPC.recordSave, suggestedName, data),
+  pickExportDir: () => ipcRenderer.invoke(IPC.exportPickDir),
+  writeExportFrame: (dir: string, index: number, data: ArrayBuffer) =>
+    ipcRenderer.invoke(IPC.exportFrame, dir, index, data)
 }
 
 contextBridge.exposeInMainWorld('liquid', api)

@@ -23,7 +23,10 @@ export const IPC = {
   ndiFrame: 'ndi:frame',
   presetsAll: 'presets:all',
   presetsSave: 'presets:save',
-  presetsDelete: 'presets:delete'
+  presetsDelete: 'presets:delete',
+  recordSave: 'record:save',
+  exportPickDir: 'export:pickDir',
+  exportFrame: 'export:frame'
 } as const
 
 /** Bridge exposed by preload as window.liquid */
@@ -46,4 +49,9 @@ export interface LiquidApi {
   /** save-or-overwrite; returns the updated list */
   presetsSave(entry: PresetEntry): Promise<PresetEntry[]>
   presetsDelete(name: string): Promise<PresetEntry[]>
+  /** save-dialog + write a finished WebM recording */
+  saveRecording(suggestedName: string, data: ArrayBuffer): Promise<{ ok: boolean; path?: string }>
+  pickExportDir(): Promise<string | null>
+  /** write one PNG frame; awaiting it gives natural backpressure */
+  writeExportFrame(dir: string, index: number, data: ArrayBuffer): Promise<void>
 }

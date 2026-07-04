@@ -203,6 +203,35 @@ export function buildPanel(env: PanelEnv): PanelHandle {
     fMeters.addBinding(env.meters, key, { readonly: true, view: 'graph', min: 0, max: 1, interval: 50 })
   }
 
+  // --- camera interaction ---------------------------------------------------------------
+  const cam = state.camera as unknown as Record<string, unknown>
+  const fCam = pane.addFolder({ title: 'Camera (movement → fluid)' })
+  bind(fCam, cam, 'enabled', ['camera'], { label: 'enabled' })
+
+  let camDeviceBinding: BindingApi | null = null
+  const rebuildCamList = async (): Promise<void> => {
+    const options: Record<string, string> = { default: '' }
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true })
+      probe.getTracks().forEach((t) => t.stop())
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      for (const d of devices) {
+        if (d.kind === 'videoinput') options[d.label || d.deviceId.slice(0, 8)] = d.deviceId
+      }
+    } catch {
+      // no permission yet — enabling the camera will trigger the prompt
+    }
+    camDeviceBinding?.dispose()
+    camDeviceBinding = bind(fCam, cam, 'deviceId', ['camera'], { label: 'camera', options })
+  }
+  void rebuildCamList()
+  fCam.addButton({ title: 'Rescan cameras' }).on('click', () => void rebuildCamList())
+
+  bind(fCam, cam, 'force', ['camera'], { label: 'force', min: 0, max: 4000, step: 50 })
+  bind(fCam, cam, 'sensitivity', ['camera'], { label: 'sensitivity', min: 0, max: 1, step: 0.01 })
+  bind(fCam, cam, 'ink', ['camera'], { label: 'ink (0 = chỉ đẩy)', min: 0, max: 1, step: 0.01 })
+  bind(fCam, cam, 'mirror', ['camera'], { label: 'mirror' })
+
   // --- mapping matrix ------------------------------------------------------------------
   const fMap = pane.addFolder({ title: 'Audio Mapping', expanded: false })
   const sourceOptions = {

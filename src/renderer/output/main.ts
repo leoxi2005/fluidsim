@@ -2,6 +2,7 @@ import { getWebGLContext } from '../engine/gl/context'
 import { FluidSolver } from '../engine/solver/FluidSolver'
 import { PostChain } from '../engine/post/PostChain'
 import { AudioEngine } from '../engine/audio/AudioEngine'
+import { CameraFlow } from '../engine/camera/CameraFlow'
 import { Emitters } from './emitters'
 import { NDI_SENDER_NAME, PAPER_STYLES, type AppState, type AudioLevels, type FluidStyle, type Mapping, type MappableParam, type PresetEntry } from '../../shared/params'
 import { applyPatchInPlace } from '../../shared/merge'
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   const solver = new FluidSolver(glc)
   const post = new PostChain(glc)
   const audio = new AudioEngine()
+  const camera = new CameraFlow()
   const emitters = new Emitters()
 
   const state: AppState = await window.liquid.getState()
@@ -134,8 +136,9 @@ async function main(): Promise<void> {
       prevSim.dyeRes = state.sim.dyeRes
       framebuffersDirty = true
     }
-    // both are idempotent — they only act when config actually differs
+    // all idempotent — they only act when config actually differs
     void audio.applyConfig(state.audio)
+    void camera.applyConfig(state.camera)
     void syncNdi()
   }
 
@@ -420,6 +423,20 @@ async function main(): Promise<void> {
       if (p.moved) {
         p.moved = false
         solver.splat(p.texcoordX, p.texcoordY, p.deltaX * effSplatForce, p.deltaY * effSplatForce, p.color, effSplatRadius)
+      }
+    }
+
+    // camera motion → directional shoves where the body moves (mirrored)
+    if (state.camera.enabled && camera.active && !state.sim.paused) {
+      const cam = state.camera
+      for (const f of camera.update(cam.sensitivity)) {
+        const px = cam.mirror ? 1 - f.x : f.x
+        const py = 1 - f.y // video y-down → texcoord y-up
+        const u = (cam.mirror ? -f.u : f.u) * cam.force
+        const v = -f.v * cam.force
+        const strength = Math.min(f.mag / 5, 1)
+        const color = cam.ink > 0 ? paletteColor(cam.ink * strength) : ([0, 0, 0] as RGB)
+        solver.splat(px, py, u, v, color, effSplatRadius * 0.7)
       }
     }
 

@@ -149,6 +149,20 @@ export interface EmitterParams {
   }
 }
 
+export interface CameraParams {
+  enabled: boolean
+  /** getUserMedia video deviceId ('' = default camera) */
+  deviceId: string
+  /** how hard motion pushes the fluid */
+  force: number
+  /** 0–1: higher catches subtler movement */
+  sensitivity: number
+  /** dye per motion splat; 0 = invisible push only */
+  ink: number
+  /** mirror horizontally — natural when facing the screen */
+  mirror: boolean
+}
+
 export type ResolutionPreset = 'window' | '1280x720' | '1920x1080' | '2560x1080' | '3840x1080' | 'custom'
 
 export interface OutputParams {
@@ -167,6 +181,7 @@ export interface AppState {
   sim: SimParams
   visual: VisualParams
   audio: AudioParams
+  camera: CameraParams
   mappings: Mappings
   emitters: EmitterParams
   output: OutputParams
@@ -229,6 +244,14 @@ export const defaultState: AppState = {
     mid: { attackMs: 25, releaseMs: 260 },
     treble: { attackMs: 12, releaseMs: 180 },
     beatSensitivity: 1.4
+  },
+  camera: {
+    enabled: false,
+    deviceId: '',
+    force: 1200,
+    sensitivity: 0.6,
+    ink: 0.3,
+    mirror: true
   },
   mappings: {
     splatForce: defaultMapping('bass', 0.6),

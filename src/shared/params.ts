@@ -163,6 +163,8 @@ export interface CameraParams {
   silhouette: number
   /** mirror horizontally — natural when facing the screen */
   mirror: boolean
+  /** picture-in-picture of camera + detected mask — essential for setup */
+  preview: boolean
 }
 
 export type ResolutionPreset = 'window' | '1280x720' | '1920x1080' | '2560x1080' | '3840x1080' | 'custom'
@@ -254,7 +256,8 @@ export const defaultState: AppState = {
     sensitivity: 0.6,
     ink: 0.2,
     silhouette: 0.55,
-    mirror: true
+    mirror: true,
+    preview: true
   },
   mappings: {
     splatForce: defaultMapping('bass', 0.6),

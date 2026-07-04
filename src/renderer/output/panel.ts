@@ -232,6 +232,7 @@ export function buildPanel(env: PanelEnv): PanelHandle {
   bind(fCam, cam, 'sensitivity', ['camera'], { label: 'sensitivity', min: 0, max: 1, step: 0.01 })
   bind(fCam, cam, 'ink', ['camera'], { label: 'motion ink (0 = chỉ đẩy)', min: 0, max: 1, step: 0.01 })
   bind(fCam, cam, 'mirror', ['camera'], { label: 'mirror' })
+  bind(fCam, cam, 'preview', ['camera'], { label: 'preview (góc trên trái)' })
 
   // --- mapping matrix ------------------------------------------------------------------
   const fMap = pane.addFolder({ title: 'Audio Mapping', expanded: false })

@@ -75,6 +75,39 @@ async function main(): Promise<void> {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, CAM_W, CAM_H, 0, gl.RED, gl.UNSIGNED_BYTE, null)
   }
 
+  // camera setup preview: live video + detected mask in red
+  const camPreview = document.getElementById('campreview') as HTMLCanvasElement
+  const camPreviewCtx = camPreview.getContext('2d')!
+  const maskCanvas = document.createElement('canvas')
+  maskCanvas.width = CAM_W
+  maskCanvas.height = CAM_H
+  const maskCtx = maskCanvas.getContext('2d')!
+  const maskImage = maskCtx.createImageData(CAM_W, CAM_H)
+
+  const drawCamPreview = (): void => {
+    const show = state.camera.enabled && state.camera.preview && camera.active
+    camPreview.classList.toggle('visible', show)
+    if (!show) return
+    const ctx = camPreviewCtx
+    ctx.save()
+    if (state.camera.mirror) {
+      ctx.translate(camPreview.width, 0)
+      ctx.scale(-1, 1)
+    }
+    ctx.drawImage(camera.videoEl, 0, 0, camPreview.width, camPreview.height)
+    const px = maskImage.data
+    for (let i = 0, j = 0; i < camera.mask.length; i++, j += 4) {
+      const m = camera.mask[i]
+      px[j] = 255
+      px[j + 1] = 40
+      px[j + 2] = 60
+      px[j + 3] = m > 0 ? 150 : 0
+    }
+    maskCtx.putImageData(maskImage, 0, 0)
+    ctx.drawImage(maskCanvas, 0, 0, camPreview.width, camPreview.height)
+    ctx.restore()
+  }
+
   const state: AppState = await window.liquid.getState()
   resizeCanvas()
   let framebuffersDirty = false
@@ -468,6 +501,7 @@ async function main(): Promise<void> {
         solver.splat(px, py, u, v, color, effSplatRadius * 0.7)
       }
     }
+    drawCamPreview()
 
     if (!state.sim.paused) {
       emitters.update(dt, state.emitters, solver, {

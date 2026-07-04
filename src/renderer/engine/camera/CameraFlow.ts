@@ -30,7 +30,8 @@ export class CameraFlow {
   private cur = new Float32Array(AW * AH)
   // adaptive background model — the empty scene learned over a few seconds
   private bg: Float32Array | null = null
-  /** body silhouette, 0–255 per analysis pixel — upload as a GL texture */
+  private maskRaw = new Uint8Array(AW * AH)
+  /** body silhouette (denoised), 0–255 per analysis pixel — upload as a GL texture */
   readonly mask = new Uint8Array(AW * AH)
   private running = false
   private busy = false
@@ -48,6 +49,11 @@ export class CameraFlow {
 
   get active(): boolean {
     return this.running
+  }
+
+  /** live video element — for the setup preview overlay */
+  get videoEl(): HTMLVideoElement {
+    return this.video
   }
 
   /** idempotent, single-flight — safe to poll every frame */
@@ -104,13 +110,14 @@ export class CameraFlow {
     // --- silhouette: background subtraction with adaptive model ---------------
     if (!this.bg) this.bg = cur.slice()
     const bg = this.bg
+    const raw = this.maskRaw
     const mask = this.mask
     let bodyPixels = 0
     for (let i = 0; i < cur.length; i++) {
       const diff = Math.abs(cur[i] - bg[i])
       const body = diff > 0.11
       if (body) bodyPixels++
-      mask[i] = body ? Math.min(255, ((diff - 0.11) * 1400) | 0) : 0
+      raw[i] = body ? Math.min(255, ((diff - 0.11) * 1400) | 0) : 0
       // empty scene absorbs fast; a standing person absorbs very slowly
       bg[i] += (cur[i] - bg[i]) * (body ? 0.0025 : 0.03)
     }
@@ -118,7 +125,16 @@ export class CameraFlow {
     if (bodyPixels > cur.length * 0.6) {
       for (let i = 0; i < cur.length; i++) {
         bg[i] += (cur[i] - bg[i]) * 0.5
-        mask[i] = 0
+        raw[i] = 0
+      }
+    }
+    // erosion: single hot pixels are sensor noise (dark rooms especially) —
+    // only pixels whose 4-neighborhood is also "body" survive
+    mask.fill(0)
+    for (let y = 1; y < AH - 1; y++) {
+      for (let x = 1; x < AW - 1; x++) {
+        const i = y * AW + x
+        if (raw[i] && raw[i - 1] && raw[i + 1] && raw[i - AW] && raw[i + AW]) mask[i] = raw[i]
       }
     }
 
@@ -133,6 +149,15 @@ export class CameraFlow {
 
     for (let gy = 1; gy < AH - CELL - 1; gy += CELL) {
       for (let gx = 1; gx < AW - CELL - 1; gx += CELL) {
+        // flow only counts inside the silhouette — background noise can't splat
+        let bodyInCell = 0
+        for (let y = gy; y < gy + CELL; y++) {
+          for (let x = gx; x < gx + CELL; x++) {
+            if (mask[y * AW + x] > 0) bodyInCell++
+          }
+        }
+        if (bodyInCell < CELL * CELL * 0.12) continue
+
         let ixx = 0
         let ixy = 0
         let iyy = 0

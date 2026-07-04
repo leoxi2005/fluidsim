@@ -9,6 +9,7 @@ import copyFragSrc from './shaders/copy.frag.glsl?raw'
 import clearFragSrc from './shaders/clear.frag.glsl?raw'
 import splatFragSrc from './shaders/splat.frag.glsl?raw'
 import advectionFragSrc from './shaders/advection.frag.glsl?raw'
+import maskSplatFragSrc from './shaders/maskSplat.frag.glsl?raw'
 import maccormackFragSrc from './shaders/maccormack.frag.glsl?raw'
 import curlFragSrc from './shaders/curl.frag.glsl?raw'
 import vorticityFragSrc from './shaders/vorticity.frag.glsl?raw'
@@ -24,6 +25,7 @@ export class FluidSolver {
   private copyProgram: Program
   private clearProgram: Program
   private splatProgram: Program
+  private maskSplatProgram: Program
   private advectionProgram: Program
   private maccormackProgram: Program
   private curlProgram: Program
@@ -54,6 +56,7 @@ export class FluidSolver {
     this.copyProgram = frag(copyFragSrc)
     this.clearProgram = frag(clearFragSrc)
     this.splatProgram = frag(splatFragSrc)
+    this.maskSplatProgram = frag(maskSplatFragSrc)
     this.advectionProgram = frag(advectionFragSrc, filterKeywords)
     this.maccormackProgram = frag(maccormackFragSrc)
     this.curlProgram = frag(curlFragSrc)
@@ -258,6 +261,22 @@ export class FluidSolver {
     gl.uniform1i(this.splatProgram.uniforms.uTarget, this.dye.read.attach(0))
     gl.uniform3f(this.splatProgram.uniforms.color, color[0], color[1], color[2])
     gl.uniform1f(this.splatProgram.uniforms.clampValue, 1.3)
+    this.blit(this.dye.write)
+    this.dye.swap()
+  }
+
+  /** print a camera silhouette mask into the dye field */
+  splatMask(maskTex: WebGLTexture, color: RGB, mirror: boolean): void {
+    const gl = this.gl
+    this.maskSplatProgram.bind()
+    gl.uniform2f(this.maskSplatProgram.uniforms.texelSize, this.dye.read.texelSizeX, this.dye.read.texelSizeY)
+    gl.uniform1i(this.maskSplatProgram.uniforms.uTarget, this.dye.read.attach(0))
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, maskTex)
+    gl.uniform1i(this.maskSplatProgram.uniforms.uMask, 1)
+    gl.uniform3f(this.maskSplatProgram.uniforms.color, color[0], color[1], color[2])
+    gl.uniform1f(this.maskSplatProgram.uniforms.mirror, mirror ? 1 : 0)
+    gl.uniform1f(this.maskSplatProgram.uniforms.clampValue, 1.3)
     this.blit(this.dye.write)
     this.dye.swap()
   }

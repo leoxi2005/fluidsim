@@ -4,8 +4,10 @@
 
 import type { CameraParams } from '../../../shared/params'
 
-const AW = 120
-const AH = 68
+export const CAM_W = 120
+export const CAM_H = 68
+const AW = CAM_W
+const AH = CAM_H
 const CELL = 8
 const MAX_VECTORS = 24
 
@@ -26,6 +28,10 @@ export class CameraFlow {
   private stream: MediaStream | null = null
   private prev: Float32Array | null = null
   private cur = new Float32Array(AW * AH)
+  // adaptive background model — the empty scene learned over a few seconds
+  private bg: Float32Array | null = null
+  /** body silhouette, 0–255 per analysis pixel — upload as a GL texture */
+  readonly mask = new Uint8Array(AW * AH)
   private running = false
   private busy = false
   private currentDeviceId = ''
@@ -82,6 +88,8 @@ export class CameraFlow {
     this.video.srcObject = null
     this.running = false
     this.prev = null
+    this.bg = null
+    this.mask.fill(0)
   }
 
   /** per-cell LK flow; returns the strongest motion vectors above threshold */
@@ -93,6 +101,18 @@ export class CameraFlow {
     for (let i = 0, j = 0; i < cur.length; i++, j += 4) {
       cur[i] = (rgba[j] * 0.299 + rgba[j + 1] * 0.587 + rgba[j + 2] * 0.114) / 255
     }
+    // --- silhouette: background subtraction with adaptive model ---------------
+    if (!this.bg) this.bg = cur.slice()
+    const bg = this.bg
+    const mask = this.mask
+    for (let i = 0; i < cur.length; i++) {
+      const diff = Math.abs(cur[i] - bg[i])
+      const body = diff > 0.11
+      mask[i] = body ? Math.min(255, ((diff - 0.11) * 1400) | 0) : 0
+      // empty scene absorbs fast; a standing person absorbs very slowly
+      bg[i] += (cur[i] - bg[i]) * (body ? 0.0025 : 0.03)
+    }
+
     if (!this.prev) {
       this.prev = cur.slice()
       return []

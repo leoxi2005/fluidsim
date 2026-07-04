@@ -227,9 +227,10 @@ export function buildPanel(env: PanelEnv): PanelHandle {
   void rebuildCamList()
   fCam.addButton({ title: 'Rescan cameras' }).on('click', () => void rebuildCamList())
 
+  bind(fCam, cam, 'silhouette', ['camera'], { label: 'silhouette (hình người)', min: 0, max: 1, step: 0.01 })
   bind(fCam, cam, 'force', ['camera'], { label: 'force', min: 0, max: 4000, step: 50 })
   bind(fCam, cam, 'sensitivity', ['camera'], { label: 'sensitivity', min: 0, max: 1, step: 0.01 })
-  bind(fCam, cam, 'ink', ['camera'], { label: 'ink (0 = chỉ đẩy)', min: 0, max: 1, step: 0.01 })
+  bind(fCam, cam, 'ink', ['camera'], { label: 'motion ink (0 = chỉ đẩy)', min: 0, max: 1, step: 0.01 })
   bind(fCam, cam, 'mirror', ['camera'], { label: 'mirror' })
 
   // --- mapping matrix ------------------------------------------------------------------

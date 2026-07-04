@@ -2,7 +2,7 @@ import { getWebGLContext } from '../engine/gl/context'
 import { FluidSolver } from '../engine/solver/FluidSolver'
 import { PostChain } from '../engine/post/PostChain'
 import { AudioEngine } from '../engine/audio/AudioEngine'
-import { CameraFlow } from '../engine/camera/CameraFlow'
+import { CAM_H, CAM_W, CameraFlow } from '../engine/camera/CameraFlow'
 import { Emitters } from './emitters'
 import { NDI_SENDER_NAME, PAPER_STYLES, type AppState, type AudioLevels, type FluidStyle, type Mapping, type MappableParam, type PresetEntry } from '../../shared/params'
 import { applyPatchInPlace } from '../../shared/merge'
@@ -60,6 +60,20 @@ async function main(): Promise<void> {
   const audio = new AudioEngine()
   const camera = new CameraFlow()
   const emitters = new Emitters()
+
+  // silhouette mask texture (updated from the camera's CPU analysis each frame)
+  const maskTex = glc.gl.createTexture()
+  {
+    const gl = glc.gl
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, maskTex)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, CAM_W, CAM_H, 0, gl.RED, gl.UNSIGNED_BYTE, null)
+  }
 
   const state: AppState = await window.liquid.getState()
   resizeCanvas()
@@ -426,10 +440,24 @@ async function main(): Promise<void> {
       }
     }
 
-    // camera motion → directional shoves where the body moves (mirrored)
+    // camera: silhouette prints into the dye, motion vectors shove it around
     if (state.camera.enabled && camera.active && !state.sim.paused) {
       const cam = state.camera
-      for (const f of camera.update(cam.sensitivity)) {
+      const vectors = camera.update(cam.sensitivity)
+
+      if (cam.silhouette > 0) {
+        const gl = glc.gl
+        gl.activeTexture(gl.TEXTURE0)
+        gl.bindTexture(gl.TEXTURE_2D, maskTex)
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, CAM_W, CAM_H, gl.RED, gl.UNSIGNED_BYTE, camera.mask)
+        // emission is per-frame → scale by dt so it's framerate-independent
+        const c = paletteColor(1)
+        const k = cam.silhouette * dt * 3.5
+        solver.splatMask(maskTex, [c[0] * k, c[1] * k, c[2] * k], cam.mirror)
+      }
+
+      for (const f of vectors) {
         const px = cam.mirror ? 1 - f.x : f.x
         const py = 1 - f.y // video y-down → texcoord y-up
         const u = (cam.mirror ? -f.u : f.u) * cam.force

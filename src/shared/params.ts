@@ -159,6 +159,8 @@ export interface CameraParams {
   sensitivity: number
   /** dye per motion splat; 0 = invisible push only */
   ink: number
+  /** silhouette dye emission — your body shape appears in the fluid */
+  silhouette: number
   /** mirror horizontally — natural when facing the screen */
   mirror: boolean
 }
@@ -250,7 +252,8 @@ export const defaultState: AppState = {
     deviceId: '',
     force: 1200,
     sensitivity: 0.6,
-    ink: 0.3,
+    ink: 0.2,
+    silhouette: 0.55,
     mirror: true
   },
   mappings: {

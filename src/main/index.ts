@@ -9,6 +9,9 @@ import * as persist from './persistence'
 
 // audio engine starts before any click — don't let Chromium suspend the AudioContext
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+// brand-new GPUs (RTX 50-series…) may not be in this Chromium's allowlist yet —
+// a blocklist fallback to SwiftShader software rendering means ~12fps
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
 
 // Main process owns state; the renderer patches it and receives external patches.
 let state: AppState = JSON.parse(JSON.stringify(defaultState))

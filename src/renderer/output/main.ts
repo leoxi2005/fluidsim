@@ -7,6 +7,7 @@ import { compileShader, Program } from '../engine/gl/program'
 import { createFBO, type FBO } from '../engine/gl/fbo'
 import baseVertSrc from '../engine/solver/shaders/base.vert.glsl?raw'
 import copyFragSrc from '../engine/solver/shaders/copy.frag.glsl?raw'
+import ndiPackFragSrc from '../engine/post/shaders/ndiPack.frag.glsl?raw'
 import { NDI_FLOOR_NAME, NDI_SENDER_NAME, PAPER_STYLES, type AppState, type AudioLevels, type FluidStyle, type Mapping, type MappableParam, type PresetEntry } from '../../shared/params'
 import { applyPatchInPlace } from '../../shared/merge'
 import { buildPanel } from './panel'
@@ -72,11 +73,35 @@ async function main(): Promise<void> {
   const floorEmitters = new Emitters()
   let floorTarget: FBO | null = null
   // inset preview needs its own tiny textured draw (blit() always fills the viewport)
-  const previewProgram = new Program(
-    glc.gl,
-    compileShader(glc.gl, glc.gl.VERTEX_SHADER, baseVertSrc),
-    compileShader(glc.gl, glc.gl.FRAGMENT_SHADER, copyFragSrc)
-  )
+  const baseVertex = compileShader(glc.gl, glc.gl.VERTEX_SHADER, baseVertSrc)
+  const previewProgram = new Program(glc.gl, baseVertex, compileShader(glc.gl, glc.gl.FRAGMENT_SHADER, copyFragSrc))
+  // NDI packing (flip + BGRA swizzle) runs on the GPU — the per-byte CPU pack
+  // in the main process was capping the whole app's frame rate on Windows
+  const ndiPackProgram = new Program(glc.gl, baseVertex, compileShader(glc.gl, glc.gl.FRAGMENT_SHADER, ndiPackFragSrc))
+  let ndiSceneFbo: FBO | null = null
+  let ndiPackFbo: FBO | null = null
+  let floorPackFbo: FBO | null = null
+
+  const ensureByteFbo = (fbo: FBO | null, w: number, h: number): FBO => {
+    if (fbo && fbo.width === w && fbo.height === h) return fbo
+    fbo?.dispose()
+    const gl = glc.gl
+    return createFBO(gl, w, h, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR)
+  }
+
+  /** fullscreen textured quad into `dst` (null = canvas) with the given program */
+  const drawTex = (program: Program, src: FBO, dst: FBO | null): void => {
+    const gl = glc.gl
+    gl.disable(gl.BLEND)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.fbo : null)
+    const w = dst ? dst.width : canvas.width
+    const h = dst ? dst.height : canvas.height
+    gl.viewport(0, 0, w, h)
+    program.bind()
+    gl.uniform2f(program.uniforms.texelSize, 1 / w, 1 / h)
+    gl.uniform1i(program.uniforms.uTexture, src.attach(0))
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0)
+  }
 
   const state: AppState = await window.liquid.getState()
   resizeCanvas()
@@ -260,24 +285,25 @@ async function main(): Promise<void> {
     const divider = Math.max(1, Math.round(60 / Math.max(1, state.output.ndiFps)))
     ndiFrameCount++
     if (ndiFrameCount % divider !== 0) return
-    if (ndiRunning.main && state.output.ndi) {
-      const bytes = canvas.width * canvas.height * 4
+    if (ndiRunning.main && state.output.ndi && ndiSceneFbo) {
+      ndiPackFbo = ensureByteFbo(ndiPackFbo, ndiSceneFbo.width, ndiSceneFbo.height)
+      drawTex(ndiPackProgram, ndiSceneFbo, ndiPackFbo) // GPU flip + BGRA
+      const bytes = ndiPackFbo.width * ndiPackFbo.height * 4
       if (!ndiPixels || ndiPixels.length !== bytes) ndiPixels = new Uint8Array(bytes)
-      // read straight after the display pass, same rAF — buffer still valid
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, ndiPixels)
+      gl.readPixels(0, 0, ndiPackFbo.width, ndiPackFbo.height, gl.RGBA, gl.UNSIGNED_BYTE, ndiPixels)
       window.liquid.ndiFrame(
-        { name: NDI_SENDER_NAME, width: canvas.width, height: canvas.height, fps: state.output.ndiFps },
+        { name: NDI_SENDER_NAME, width: ndiPackFbo.width, height: ndiPackFbo.height, fps: state.output.ndiFps, packed: true },
         ndiPixels
       )
     }
     if (ndiRunning.floor && state.output.floor.enabled && floorTarget) {
-      const bytes = floorTarget.width * floorTarget.height * 4
+      floorPackFbo = ensureByteFbo(floorPackFbo, floorTarget.width, floorTarget.height)
+      drawTex(ndiPackProgram, floorTarget, floorPackFbo)
+      const bytes = floorPackFbo.width * floorPackFbo.height * 4
       if (!ndiFloorPixels || ndiFloorPixels.length !== bytes) ndiFloorPixels = new Uint8Array(bytes)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, floorTarget.fbo)
-      gl.readPixels(0, 0, floorTarget.width, floorTarget.height, gl.RGBA, gl.UNSIGNED_BYTE, ndiFloorPixels)
+      gl.readPixels(0, 0, floorPackFbo.width, floorPackFbo.height, gl.RGBA, gl.UNSIGNED_BYTE, ndiFloorPixels)
       window.liquid.ndiFrame(
-        { name: NDI_FLOOR_NAME, width: floorTarget.width, height: floorTarget.height, fps: state.output.ndiFps },
+        { name: NDI_FLOOR_NAME, width: floorPackFbo.width, height: floorPackFbo.height, fps: state.output.ndiFps, packed: true },
         ndiFloorPixels
       )
     }
@@ -379,7 +405,12 @@ async function main(): Promise<void> {
   }
 
   // --- in-window control panel ---------------------------------------------------
-  const stats = { fps: 0 }
+  // unmasked GPU name — instantly tells software-rendering fallbacks apart
+  const dbgExt = glc.gl.getExtension('WEBGL_debug_renderer_info')
+  const gpuName = dbgExt ? String(glc.gl.getParameter(dbgExt.UNMASKED_RENDERER_WEBGL)) : 'unknown'
+  console.log('[gpu]', gpuName)
+
+  const stats = { fps: 0, gpu: gpuName }
   const meters = { sub: 0, bass: 0, mid: 0, treble: 0, kick: 0, snare: 0, hat: 0, energy: 0, bpm: '—' }
   const panel = buildPanel({
     state,
@@ -621,7 +652,15 @@ async function main(): Promise<void> {
     if (floorOn() && floorTarget) {
       floorPost.render(floorSolver.dyeRead, floorSolver.velocityRead, state.visual, postEnv, floorTarget)
     }
-    post.render(solver.dyeRead, solver.velocityRead, state.visual, postEnv)
+    if (ndiRunning.main && state.output.ndi) {
+      // render offscreen so the GPU packer can sample it (the canvas' default
+      // framebuffer isn't a texture), then mirror it onto the screen
+      ndiSceneFbo = ensureByteFbo(ndiSceneFbo, canvas.width, canvas.height)
+      post.render(solver.dyeRead, solver.velocityRead, state.visual, postEnv, ndiSceneFbo)
+      drawTex(previewProgram, ndiSceneFbo, null)
+    } else {
+      post.render(solver.dyeRead, solver.velocityRead, state.visual, postEnv)
+    }
 
     if (ndiRunning.main || ndiRunning.floor) captureNdiFrames()
     drawFloorPreview()

@@ -315,6 +315,8 @@ export interface NdiFrameMeta {
   width: number
   height: number
   fps: number
+  /** true = already BGRA top-down (GPU-packed) — skip the CPU conversion */
+  packed?: boolean
 }
 
 export interface NdiStatus {

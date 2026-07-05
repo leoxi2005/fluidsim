@@ -10,7 +10,7 @@ import { PALETTES } from '../../shared/palettes'
 
 export interface PanelEnv {
   state: AppState
-  stats: { fps: number }
+  stats: { fps: number; gpu: string }
   meters: { sub: number; bass: number; mid: number; treble: number; kick: number; snare: number; hat: number; energy: number; bpm: string }
   randomSplats(): void
   clearDye(): void
@@ -338,6 +338,8 @@ export function buildPanel(env: PanelEnv): PanelHandle {
   const fPerf = pane.addFolder({ title: 'Performance', expanded: false })
   fPerf.addBinding(env.stats, 'fps', { readonly: true, view: 'graph', min: 0, max: 130 })
   fPerf.addBinding(env.stats, 'fps', { readonly: true, format: (v: number) => v.toFixed(0) })
+  // "SwiftShader" here = software rendering — the GPU isn't being used at all
+  fPerf.addBinding(env.stats, 'gpu', { readonly: true, label: 'GPU', multiline: true, rows: 2, interval: 10000 })
 
   // patches from other windows/processes (none today, future-proof)
   window.liquid.onStateChanged(() => {

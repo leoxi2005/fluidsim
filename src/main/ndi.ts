@@ -144,7 +144,8 @@ export function sendFrame(meta: NdiFrameMeta, rgba: Buffer): void {
 
   e.width = meta.width
   e.height = meta.height
-  const data = packBgraFlipped(e, rgba, meta.width, meta.height)
+  // renderer now packs BGRA+flip on the GPU; the CPU path stays as fallback
+  const data = meta.packed ? rgba : packBgraFlipped(e, rgba, meta.width, meta.height)
 
   const frame = {
     type: 'video',

@@ -125,7 +125,9 @@ async function main(): Promise<void> {
       const k = Math.min(amt, 1.3) * 0.9
       return [(1 - c[0]) * k, (1 - c[1]) * k, (1 - c[2]) * k]
     }
-    const k = amt * 1.5
+    // additive styles: keep emitted light modest — busy music stacks splats
+    // toward the dye clamp and the whole frame washes out to white
+    const k = amt * 0.9
     return [c[0] * k, c[1] * k, c[2] * k]
   }
 

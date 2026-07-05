@@ -112,8 +112,18 @@ export class PostChain {
     this.sunraysTemp = createFBO(gl, sunraysRes.width, sunraysRes.height, r.internalFormat, r.format, texType, filtering)
   }
 
-  /** target = null → the on-screen canvas; an FBO → offscreen feed (floor) */
-  render(dye: FBO, velocity: FBO, p: VisualParams, env: PostEnv, target: FBO | null = null): void {
+  /**
+   * target = null → the on-screen canvas; an FBO → offscreen feed (floor).
+   * uvRect crops a window of the dye field (wall/floor views of one shared sim).
+   */
+  render(
+    dye: FBO,
+    velocity: FBO,
+    p: VisualParams,
+    env: PostEnv,
+    target: FBO | null = null,
+    uvRect: { x: number; y: number; w: number; h: number } = { x: 0, y: 0, w: 1, h: 1 }
+  ): void {
     const gl = this.gl
     const paper = PAPER_STYLES.includes(env.style)
     const bloomOn = !paper && p.bloom && this.available && this.bloomMips.length > 0
@@ -134,6 +144,8 @@ export class PostChain {
     const w = target ? target.width : gl.drawingBufferWidth
     const h = target ? target.height : gl.drawingBufferHeight
     gl.uniform2f(u.texelSize, 1 / w, 1 / h)
+    gl.uniform2f(u.uvOffset, uvRect.x, uvRect.y)
+    gl.uniform2f(u.uvScale, uvRect.w, uvRect.h)
     gl.uniform1i(u.uTexture, dye.attach(0))
     gl.uniform1f(u.aspect, w / h)
     gl.uniform3f(u.bgColor, env.bgColor[0], env.bgColor[1], env.bgColor[2])

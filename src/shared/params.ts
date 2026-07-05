@@ -151,12 +151,17 @@ export interface EmitterParams {
 
 export type ResolutionPreset = 'window' | '1280x720' | '1920x1080' | '2560x1080' | '3840x1080' | 'custom'
 
-/** second render target — LED floor fed over its own NDI sender */
+/**
+ * LED floor fed over its own NDI sender. The floor is SEAMLESS with the wall:
+ * one shared sim spans wall + floor, the floor view is the band below the
+ * wall's bottom edge — ink flows across the seam unbroken.
+ */
 export interface FloorParams {
-  /** runs a second sim at the floor's aspect and streams it as NDI "LIQUID FLOOR" */
   enabled: boolean
   width: number
   height: number
+  /** where the floor attaches along the wall's width (0 = left, 0.5 = center) */
+  offsetX: number
   /** inset preview of the floor feed in the main window (shows up in recordings) */
   preview: boolean
 }
@@ -276,6 +281,7 @@ export const defaultState: AppState = {
       enabled: true,
       width: 2836,
       height: 2660,
+      offsetX: 0.5,
       preview: true
     }
   }

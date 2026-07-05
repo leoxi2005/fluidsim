@@ -36,6 +36,9 @@ uniform float paperTexture;
 uniform float uTime;
 // beat envelope 0–1 — display-side throb, never disturbs the fluid itself
 uniform float beatPulse;
+// view window into the dye field — wall/floor are crops of one shared sim
+uniform vec2 uvOffset;
+uniform vec2 uvScale;
 
 #ifdef BLOOM
 uniform sampler2D uBloom;
@@ -94,13 +97,14 @@ vec3 hueRotate (vec3 color, float angle) {
 }
 
 void main () {
-    // (a kick zoom-punch lived here once — it read as the screen stuttering.
-    // beat legibility comes from the sim-side kick boom instead.)
-    vec2 uv = vUv;
-    vec2 uvL = vL;
-    vec2 uvR = vR;
-    vec2 uvT = vT;
-    vec2 uvB = vB;
+    // remap this view's uv into the shared dye field; one target pixel spans
+    // texelSize·uvScale in dye space, so neighbor taps scale the same way
+    vec2 uv = uvOffset + vUv * uvScale;
+    vec2 dtex = texelSize * uvScale;
+    vec2 uvL = uv - vec2(dtex.x, 0.0);
+    vec2 uvR = uv + vec2(dtex.x, 0.0);
+    vec2 uvT = uv + vec2(0.0, dtex.y);
+    vec2 uvB = uv - vec2(0.0, dtex.y);
     vec3 c = texture(uTexture, uv).rgb;
 
     vec2 rv = (vUv - 0.5) * vec2(aspect, 1.0);
@@ -132,8 +136,8 @@ void main () {
     // leaving the faint rainbow fringe real washes get as they dry
     float sep = smoothstep(0.02, 0.2, edge) * (0.6 + paperTexture * 1.2);
     vec2 gdir = edge > 1e-5 ? normalize(vec2(dx, dy)) : vec2(0.0);
-    c.r = texture(uTexture, uv + gdir * texelSize * sep).r;
-    c.b = texture(uTexture, uv - gdir * texelSize * sep).b;
+    c.r = texture(uTexture, uv + gdir * dtex * sep).r;
+    c.b = texture(uTexture, uv - gdir * dtex * sep).b;
 #endif
     // granulation: pigment settles into the paper tooth unevenly.
     // pixel-space noise — uv-space scaled with aspect and turned into

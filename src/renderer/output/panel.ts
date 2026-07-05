@@ -294,11 +294,10 @@ export function buildPanel(env: PanelEnv): PanelHandle {
 
   // --- floor: second sim + its own NDI sender -------------------------------------------
   const floor = state.output.floor as unknown as Record<string, unknown>
-  const fFloor = fOutput.addFolder({ title: 'Floor · liền mạch tường↕sàn · NDI "LIQUID FLOOR"' })
+  const fFloor = fOutput.addFolder({ title: 'Floor · NDI "LIQUID FLOOR"' })
   bind(fFloor, floor, 'enabled', ['output', 'floor'], { label: 'floor output' })
   bind(fFloor, floor, 'width', ['output', 'floor'], { label: 'floor W', min: 256, max: 16384, step: 2 })
   bind(fFloor, floor, 'height', ['output', 'floor'], { label: 'floor H', min: 256, max: 16384, step: 2 })
-  bind(fFloor, floor, 'offsetX', ['output', 'floor'], { label: 'vị trí sàn (0=trái · 0.5=giữa)', min: 0, max: 1, step: 0.01 })
   bind(fFloor, floor, 'preview', ['output', 'floor'], { label: 'preview (góc dưới phải)' })
 
   const ndiInfo = { status: '—' }

@@ -63,7 +63,13 @@ async function main(): Promise<void> {
   const audio = new AudioEngine()
   const emitters = new Emitters()
 
-  // floor NDI feed target; the floor itself is a crop of the shared sim below
+  // --- floor feed: its own sim at the floor's aspect, offscreen --------------------
+  // (a shared seamless wall+floor domain was tried and reverted: the wall had to
+  // share sim space with the tall floor, which magnified every wash ~3.5× on the
+  // wall and destroyed the original look. Two sims answer the same beats instead.)
+  const floorSolver = new FluidSolver(glc)
+  const floorPost = new PostChain(glc)
+  const floorEmitters = new Emitters()
   let floorTarget: FBO | null = null
   // inset preview needs its own tiny textured draw (blit() always fills the viewport)
   const previewProgram = new Program(
@@ -81,43 +87,8 @@ async function main(): Promise<void> {
     onKick: false, onSnare: false, onHat: false, onBeat: false
   }
 
-  // --- seamless wall + floor: ONE sim domain, two cropped views ---------------------
-  // The wall (main output) is the top band; the floor extends below its bottom
-  // edge at floor.offsetX along the width. Ink crosses the seam unbroken because
-  // both views window the same dye field.
-  interface UvRect { x: number; y: number; w: number; h: number }
-  interface Views { domainW: number; domainH: number; wall: UvRect; floor: UvRect | null }
-  const wallSize = (): { w: number; h: number } => targetSize() ?? { w: canvas.width, h: canvas.height }
-  const computeViews = (): Views => {
-    const ws = wallSize()
-    const f = state.output.floor
-    if (!f.enabled) {
-      return { domainW: ws.w, domainH: ws.h, wall: { x: 0, y: 0, w: 1, h: 1 }, floor: null }
-    }
-    const fw = clampDim(f.width)
-    const fh = clampDim(f.height)
-    const W = Math.max(ws.w, fw)
-    const H = ws.h + fh
-    const floorFrac = fh / H
-    return {
-      domainW: W,
-      domainH: H,
-      wall: { x: (1 - ws.w / W) / 2, y: floorFrac, w: ws.w / W, h: ws.h / H },
-      floor: { x: f.offsetX * (1 - fw / W), y: 0, w: fw / W, h: floorFrac }
-    }
-  }
-  let views = computeViews()
-  const prevDomain = { w: views.domainW, h: views.domainH }
-
-  // simRes/dyeRes are meant per-VIEW: the wall must keep its full detail even
-  // though it only occupies a band of the shared domain — scale the grids up by
-  // the inverse of that band (getResolution still caps the long side for the GPU)
-  const initDomainBuffers = (): void => {
-    const resScale = views.floor ? 1 / views.wall.h : 1
-    solver.initFramebuffers(state.sim.simRes * resScale, state.sim.dyeRes * resScale, views.domainW, views.domainH)
-    post.initFramebuffers(views.domainW, views.domainH)
-  }
-  initDomainBuffers()
+  solver.initFramebuffers(state.sim.simRes, state.sim.dyeRes)
+  post.initFramebuffers()
   void audio.applyConfig(state.audio)
 
   // --- style resolution ---------------------------------------------------------
@@ -196,7 +167,9 @@ async function main(): Promise<void> {
   }
 
   // --- floor render target -------------------------------------------------------
-  // just the NDI/preview FBO; the fluid itself lives in the shared domain
+  // (re)create the FBO + floor sim whenever the floor size changes; the solver
+  // and post chain are told the fixed output size so aspect stays true
+  let floorSplashed = false
   const prevFloorSize = { w: 0, h: 0 }
   function syncFloorTargets(): void {
     const f = state.output.floor
@@ -210,6 +183,12 @@ async function main(): Promise<void> {
     floorTarget?.dispose()
     // plain byte RGBA — this is a video feed, readPixels wants UNSIGNED_BYTE
     floorTarget = createFBO(gl, w, h, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR)
+    floorSolver.initFramebuffers(state.sim.simRes, state.sim.dyeRes, w, h)
+    floorPost.initFramebuffers(w, h)
+    if (!floorSplashed) {
+      floorSplashed = true
+      floorSolver.multipleSplats(6, state.sim.splatRadius, () => paletteColor(0.55))
+    }
   }
 
   // --- NDI out ------------------------------------------------------------------
@@ -309,8 +288,14 @@ async function main(): Promise<void> {
     const gl = glc.gl
     gl.disable(gl.BLEND)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-    const pw = Math.max(140, Math.round(canvas.width * 0.14))
-    const ph = Math.round((pw * floorTarget.height) / floorTarget.width)
+    let pw = Math.max(140, Math.round(canvas.width * 0.14))
+    let ph = Math.round((pw * floorTarget.height) / floorTarget.width)
+    // ultra-wide walls: width-based sizing can exceed the canvas height entirely
+    const maxH = Math.round(canvas.height * 0.42)
+    if (ph > maxH) {
+      ph = maxH
+      pw = Math.round((ph * floorTarget.width) / floorTarget.height)
+    }
     gl.viewport(canvas.width - pw - 16, 16, pw, ph)
     previewProgram.bind()
     gl.uniform2f(previewProgram.uniforms.texelSize, 1 / pw, 1 / ph)
@@ -324,9 +309,11 @@ async function main(): Promise<void> {
     switch (action.type) {
       case 'randomSplats':
         solver.multipleSplats(action.count, state.sim.splatRadius, () => paletteColor(0.7))
+        if (floorOn()) floorSolver.multipleSplats(action.count, state.sim.splatRadius, () => paletteColor(0.7))
         break
       case 'clearDye':
         solver.clearDye()
+        floorSolver.clearDye()
         break
     }
   })
@@ -396,8 +383,14 @@ async function main(): Promise<void> {
     state,
     stats,
     meters,
-    randomSplats: () => solver.multipleSplats(8, state.sim.splatRadius, () => paletteColor(0.7)),
-    clearDye: () => solver.clearDye(),
+    randomSplats: () => {
+      solver.multipleSplats(8, state.sim.splatRadius, () => paletteColor(0.7))
+      if (floorOn()) floorSolver.multipleSplats(8, state.sim.splatRadius, () => paletteColor(0.7))
+    },
+    clearDye: () => {
+      solver.clearDye()
+      floorSolver.clearDye()
+    },
     toggleFullscreen: () => window.liquid.sendAction({ type: 'toggleFullscreen' }),
     recording: recState,
     toggleRecording,
@@ -479,9 +472,11 @@ async function main(): Promise<void> {
         break
       case 'KeyR':
         solver.multipleSplats(8, state.sim.splatRadius, () => paletteColor(0.7))
+        if (floorOn()) floorSolver.multipleSplats(8, state.sim.splatRadius, () => paletteColor(0.7))
         break
       case 'KeyC':
         solver.clearDye()
+        floorSolver.clearDye()
         break
       default:
         // 1–9 → preset slots in list order, crossfaded
@@ -511,13 +506,12 @@ async function main(): Promise<void> {
     lastTime = now
     const nowSec = now / 1000
 
-    resizeCanvas()
-    views = computeViews()
-    if (framebuffersDirty || views.domainW !== prevDomain.w || views.domainH !== prevDomain.h) {
+    if (resizeCanvas() || framebuffersDirty) {
       framebuffersDirty = false
-      prevDomain.w = views.domainW
-      prevDomain.h = views.domainH
-      initDomainBuffers()
+      solver.initFramebuffers(state.sim.simRes, state.sim.dyeRes)
+      post.initFramebuffers()
+      // floor sim shares simRes/dyeRes but keeps its own fixed aspect
+      if (floorTarget) floorSolver.initFramebuffers(state.sim.simRes, state.sim.dyeRes, floorTarget.width, floorTarget.height)
     }
 
     // preset crossfade: lerp state toward the target each frame
@@ -549,21 +543,12 @@ async function main(): Promise<void> {
       splatForce: effSplatForce,
       splatRadius: effSplatRadius
     }
-    const aspect = views.domainW / views.domainH
+    const aspect = canvas.width / canvas.height
 
-    // the canvas shows the wall view — map pointer coords into its window
-    const wallV = views.wall
     for (const p of pointers.values()) {
       if (p.moved) {
         p.moved = false
-        solver.splat(
-          wallV.x + p.texcoordX * wallV.w,
-          wallV.y + p.texcoordY * wallV.h,
-          p.deltaX * effSplatForce,
-          p.deltaY * effSplatForce,
-          p.color,
-          effSplatRadius
-        )
+        solver.splat(p.texcoordX, p.texcoordY, p.deltaX * effSplatForce, p.deltaY * effSplatForce, p.color, effSplatRadius)
       }
     }
 
@@ -581,13 +566,7 @@ async function main(): Promise<void> {
       smoothSpeedMult += (targetSpeedMult - smoothSpeedMult) * (1 - Math.exp(-dt / 0.6))
       const audioSpeedMult = smoothSpeedMult
 
-      // anchored drum hits fire on BOTH surfaces; the fluid between them is one
-      const regions = views.floor
-        ? [
-            { x0: wallV.x, y0: wallV.y, x1: wallV.x + wallV.w, y1: wallV.y + wallV.h },
-            { x0: views.floor.x, y0: views.floor.y, x1: views.floor.x + views.floor.w, y1: views.floor.y + views.floor.h }
-          ]
-        : [{ x0: 0, y0: 0, x1: 1, y1: 1 }]
+      const fullRegion = [{ x0: 0, y0: 0, x1: 1, y1: 1 }]
       emitters.update(dt, state.emitters, solver, {
         levels,
         speedMult: modMult('emitterSpeed'),
@@ -595,9 +574,23 @@ async function main(): Promise<void> {
         splatRadius: effSplatRadius,
         color: paletteColor,
         audioActive: state.audio.source !== 'none',
-        regions
+        regions: fullRegion
       })
       solver.step(dt * state.sim.speed * audioSpeedMult, effSim)
+
+      // floor: same audio events / params, its own field at the floor's aspect
+      if (floorOn() && floorTarget) {
+        floorEmitters.update(dt, state.emitters, floorSolver, {
+          levels,
+          speedMult: modMult('emitterSpeed'),
+          aspect: floorTarget.width / floorTarget.height,
+          splatRadius: effSplatRadius,
+          color: paletteColor,
+          audioActive: state.audio.source !== 'none',
+          regions: fullRegion
+        })
+        floorSolver.step(dt * state.sim.speed * audioSpeedMult, effSim)
+      }
     }
 
     const pal = getPalette(state.visual.palette)
@@ -608,6 +601,7 @@ async function main(): Promise<void> {
     if (paper !== prevPaper) {
       prevPaper = paper
       solver.clearDye()
+      floorSolver.clearDye()
     }
     // when the style disagrees with the palette's native mode, swap in a neutral bg
     const bgHex = paper
@@ -622,10 +616,10 @@ async function main(): Promise<void> {
       style,
       beatPulse: levels.beat
     }
-    if (floorOn() && floorTarget && views.floor) {
-      post.render(solver.dyeRead, solver.velocityRead, state.visual, postEnv, floorTarget, views.floor)
+    if (floorOn() && floorTarget) {
+      floorPost.render(floorSolver.dyeRead, floorSolver.velocityRead, state.visual, postEnv, floorTarget)
     }
-    post.render(solver.dyeRead, solver.velocityRead, state.visual, postEnv, null, views.wall)
+    post.render(solver.dyeRead, solver.velocityRead, state.visual, postEnv)
 
     if (ndiRunning.main || ndiRunning.floor) captureNdiFrames()
     drawFloorPreview()
